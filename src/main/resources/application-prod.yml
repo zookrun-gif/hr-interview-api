@@ -1,0 +1,72 @@
+spring:
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${MYSQL_URL:jdbc:mysql://your-mysql-host:3306/hr_interview?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
+    druid:
+      initial-size: 10
+      min-idle: 10
+      max-active: 50
+      max-wait: 60000
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      pool-prepared-statements: true
+      max-pool-prepared-statement-per-connection-size: 50
+  redis:
+    host: ${REDIS_HOST:your-redis-host}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+    database: ${REDIS_DATABASE:0}
+    timeout: 3000
+    lettuce:
+      pool:
+        max-active: 64
+        max-idle: 16
+        min-idle: 8
+        max-wait: 3000
+
+knife4j:
+  enable: false
+
+volcengine:
+  realtime:
+    ws-url: wss://openspeech.bytedance.com/api/v3/realtime/dialogue
+    app-id: ${VOLCENGINE_REALTIME_APP_ID:}
+    access-key: ${VOLCENGINE_REALTIME_ACCESS_KEY:}
+    resource-id: ${VOLCENGINE_REALTIME_RESOURCE_ID:volc.speech.dialog}
+    app-key: ${VOLCENGINE_REALTIME_APP_KEY:}
+    speaker: ${VOLCENGINE_REALTIME_SPEAKER:zh_female_vv_jupiter_bigtts}
+    dialog-model: ${VOLCENGINE_REALTIME_DIALOG_MODEL:1.2.1.1}
+    input-audio-format: pcm_s16le
+    output-audio-format: pcm_s16le
+    sample-rate: 16000
+    output-sample-rate: 24000
+    channel: 1
+    instructions: 你是一名专业、友善、克制的 AI 面试官。请围绕岗位 JD、能力要求和候选人简历进行中文面试。每次只问一个问题，问题要清晰、具体、适合口语回答。
+  resume-ai:
+    enabled: true
+    base-url: ${VOLCENGINE_RESUME_AI_BASE_URL:https://ark.cn-beijing.volces.com/api/v3/chat/completions}
+    api-key: ${VOLCENGINE_RESUME_AI_API_KEY:}
+    model: ${VOLCENGINE_RESUME_AI_MODEL:}
+    timeout-seconds: 30
+    max-resume-chars: 12000
+
+wecom:
+  enabled: true
+  corp-id: ${WECOM_CORP_ID:}
+  agent-id: ${WECOM_AGENT_ID:1000035}
+  secret: ${WECOM_SECRET:}
+  redirect-uri: ${WECOM_REDIRECT_URI:https://zook.kaixinzou.cn/login/wecom-callback}
+  auto-create-user: true
+  default-role-code: HR
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:change-me-prod-jwt-secret-at-least-32-chars}
+    expires-in-seconds: ${JWT_EXPIRES_IN_SECONDS:86400}

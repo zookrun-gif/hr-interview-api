@@ -1,0 +1,8 @@
+.git
+.idea
+target
+logs
+*.iml
+Dockerfile
+docker-compose*.yml
+deploy
