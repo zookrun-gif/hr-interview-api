@@ -1,6 +1,6 @@
 package com.zook.hrinterview.config;
 
-import com.zook.hrinterview.realtime.VolcengineRealtimeWebSocketHandler;
+import com.zook.hrinterview.realtime.handler.VolcengineRealtimeWebSocketHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;

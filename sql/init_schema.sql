@@ -1,12 +1,62 @@
--- AI 面试初筛 MVP 初始化 SQL
+-- 奢享家 HR AI 面试系统统一初始化 SQL
 -- 数据库：MySQL 8.x
--- 说明：该脚本不由程序自动执行，请在目标数据库中手动执行。
+-- 说明：
+-- 1. 该脚本不由程序自动执行，请在目标数据库中手动执行。
+-- 2. 新环境直接执行本文件即可完成建库、建表、基础配置和权限初始化。
+-- 3. 已执行过旧版 SQL 的环境，也优先重复执行本文件，脚本会尽量补齐缺失字段和索引。
 
 create database if not exists hr_interview
     default character set utf8mb4
     collate utf8mb4_0900_ai_ci;
 
 use hr_interview;
+
+drop procedure if exists add_column_if_missing;
+drop procedure if exists add_index_if_missing;
+
+delimiter //
+
+create procedure add_column_if_missing(
+    in p_table_name varchar(64),
+    in p_column_name varchar(64),
+    in p_alter_sql text
+)
+begin
+    if not exists (
+        select 1
+        from information_schema.columns
+        where table_schema = database()
+          and table_name = p_table_name
+          and column_name = p_column_name
+    ) then
+        set @ddl = p_alter_sql;
+        prepare stmt from @ddl;
+        execute stmt;
+        deallocate prepare stmt;
+    end if;
+end //
+
+create procedure add_index_if_missing(
+    in p_table_name varchar(64),
+    in p_index_name varchar(64),
+    in p_create_sql text
+)
+begin
+    if not exists (
+        select 1
+        from information_schema.statistics
+        where table_schema = database()
+          and table_name = p_table_name
+          and index_name = p_index_name
+    ) then
+        set @ddl = p_create_sql;
+        prepare stmt from @ddl;
+        execute stmt;
+        deallocate prepare stmt;
+    end if;
+end //
+
+delimiter ;
 
 create table if not exists hr_user (
     id bigint not null auto_increment comment '用户ID',
@@ -29,6 +79,12 @@ create table if not exists hr_user (
   default charset = utf8mb4
   collate = utf8mb4_0900_ai_ci
   comment = 'HR用户表';
+
+call add_column_if_missing('hr_user', 'mobile', 'alter table hr_user add column mobile varchar(32) null comment ''手机号'' after email');
+call add_column_if_missing('hr_user', 'wecom_userid', 'alter table hr_user add column wecom_userid varchar(100) null comment ''企业微信成员UserID'' after mobile');
+call add_column_if_missing('hr_user', 'avatar', 'alter table hr_user add column avatar varchar(500) null comment ''头像地址'' after wecom_userid');
+call add_index_if_missing('hr_user', 'uk_hr_user_wecom_userid', 'alter table hr_user add unique key uk_hr_user_wecom_userid (wecom_userid)');
+call add_index_if_missing('hr_user', 'idx_hr_user_mobile', 'create index idx_hr_user_mobile on hr_user (mobile)');
 
 create table if not exists rbac_role (
     id bigint not null auto_increment comment '角色ID',
@@ -70,6 +126,11 @@ create table if not exists rbac_permission (
   collate = utf8mb4_0900_ai_ci
   comment = 'RBAC权限表';
 
+call add_column_if_missing('rbac_permission', 'parent_id', 'alter table rbac_permission add column parent_id bigint not null default 0 comment ''父级权限ID，根节点为0'' after id');
+call add_column_if_missing('rbac_permission', 'permission_key', 'alter table rbac_permission add column permission_key varchar(100) null comment ''前端权限标识'' after code');
+call add_column_if_missing('rbac_permission', 'component', 'alter table rbac_permission add column component varchar(100) null comment ''前端组件或页面标识'' after resource_path');
+call add_index_if_missing('rbac_permission', 'idx_rbac_permission_parent_id', 'create index idx_rbac_permission_parent_id on rbac_permission (parent_id)');
+
 create table if not exists rbac_user_role (
     id bigint not null auto_increment comment '用户角色关联ID',
     user_id bigint not null comment '用户ID',
@@ -98,11 +159,6 @@ create table if not exists rbac_role_permission (
   collate = utf8mb4_0900_ai_ci
   comment = 'RBAC角色权限关联表';
 
--- 如果已执行过旧版RBAC建表SQL，请手动执行以下语句升级权限表结构：
--- alter table rbac_permission add column parent_id bigint not null default 0 comment '父级权限ID，根节点为0' after id;
--- alter table rbac_permission add column permission_key varchar(100) null comment '前端权限标识' after code;
--- alter table rbac_permission add column component varchar(100) null comment '前端组件或页面标识' after resource_path;
--- alter table rbac_permission add index idx_rbac_permission_parent_id (parent_id);
 create table if not exists job_position (
     id bigint not null auto_increment comment '岗位ID',
     title varchar(200) not null comment '岗位名称',
@@ -114,7 +170,9 @@ create table if not exists job_position (
     updated_at datetime not null comment '更新时间',
     primary key (id),
     key idx_job_position_status (status),
-    key idx_job_position_created_by (created_by)
+    key idx_job_position_created_by (created_by),
+    key idx_job_position_created_at (created_at),
+    key idx_job_position_status_created_at (status, created_at)
 ) engine = InnoDB
   default charset = utf8mb4
   collate = utf8mb4_0900_ai_ci
@@ -152,21 +210,20 @@ create table if not exists candidate (
     key idx_candidate_name (name),
     key idx_candidate_phone (phone),
     key idx_candidate_email (email),
-    key idx_candidate_created_by (created_by)
+    key idx_candidate_created_by (created_by),
+    key idx_candidate_created_at (created_at),
+    key idx_candidate_job_created_at (job_id, created_at)
 ) engine = InnoDB
   default charset = utf8mb4
   collate = utf8mb4_0900_ai_ci
   comment = '候选人表';
 
--- 如果已执行过旧版建表 SQL，请手动执行以下语句为候选人表增加岗位绑定字段：
--- alter table candidate add column job_id bigint null comment '绑定岗位ID' after id;
--- update candidate set job_id = 1 where job_id is null;
--- alter table candidate modify column job_id bigint not null comment '绑定岗位ID';
--- alter table candidate add index idx_candidate_job_id (job_id);
-
--- 如果已执行过旧版建表 SQL，请手动执行以下语句为候选人表增加性别和年龄字段：
--- alter table candidate add column gender varchar(32) null comment '性别：MALE男，FEMALE女，UNKNOWN未知' after name;
--- alter table candidate add column age int null comment '年龄' after gender;
+call add_column_if_missing('candidate', 'job_id', 'alter table candidate add column job_id bigint null comment ''绑定岗位ID'' after id');
+call add_column_if_missing('candidate', 'gender', 'alter table candidate add column gender varchar(32) null comment ''性别：MALE男，FEMALE女，UNKNOWN未知'' after name');
+call add_column_if_missing('candidate', 'age', 'alter table candidate add column age int null comment ''年龄'' after gender');
+call add_index_if_missing('candidate', 'idx_candidate_job_id', 'create index idx_candidate_job_id on candidate (job_id)');
+call add_index_if_missing('candidate', 'idx_candidate_created_at', 'create index idx_candidate_created_at on candidate (created_at)');
+call add_index_if_missing('candidate', 'idx_candidate_job_created_at', 'create index idx_candidate_job_created_at on candidate (job_id, created_at)');
 
 create table if not exists interview_session (
     id bigint not null auto_increment comment '面试会话ID',
@@ -184,14 +241,21 @@ create table if not exists interview_session (
     unique key uk_interview_session_invite_token (invite_token),
     key idx_interview_session_job_id (job_id),
     key idx_interview_session_candidate_id (candidate_id),
-    key idx_interview_session_status (status)
+    key idx_interview_session_status (status),
+    key idx_interview_session_created_at (created_at),
+    key idx_interview_session_status_created_at (status, created_at),
+    key idx_interview_session_job_created_at (job_id, created_at),
+    key idx_interview_session_candidate_created_at (candidate_id, created_at)
 ) engine = InnoDB
   default charset = utf8mb4
   collate = utf8mb4_0900_ai_ci
   comment = '面试会话表';
 
--- 如果已执行过旧版建表 SQL，请手动执行以下语句为面试会话表增加访问口令哈希字段：
--- alter table interview_session add column access_code_hash varchar(100) null comment '面试访问口令哈希' after invite_token;
+call add_column_if_missing('interview_session', 'access_code_hash', 'alter table interview_session add column access_code_hash varchar(100) null comment ''面试访问口令哈希'' after invite_token');
+call add_index_if_missing('interview_session', 'idx_interview_session_created_at', 'create index idx_interview_session_created_at on interview_session (created_at)');
+call add_index_if_missing('interview_session', 'idx_interview_session_status_created_at', 'create index idx_interview_session_status_created_at on interview_session (status, created_at)');
+call add_index_if_missing('interview_session', 'idx_interview_session_job_created_at', 'create index idx_interview_session_job_created_at on interview_session (job_id, created_at)');
+call add_index_if_missing('interview_session', 'idx_interview_session_candidate_created_at', 'create index idx_interview_session_candidate_created_at on interview_session (candidate_id, created_at)');
 
 create table if not exists interview_message (
     id bigint not null auto_increment comment '面试消息ID',
@@ -203,12 +267,14 @@ create table if not exists interview_message (
     created_at datetime not null comment '创建时间',
     primary key (id),
     key idx_interview_message_session_id (session_id),
-    key idx_interview_message_sequence_no (session_id, sequence_no)
+    key idx_interview_message_sequence_no (session_id, sequence_no),
+    key idx_interview_message_session_sequence_id (session_id, sequence_no, id)
 ) engine = InnoDB
   default charset = utf8mb4
   collate = utf8mb4_0900_ai_ci
   comment = '面试消息记录表';
 
+call add_index_if_missing('interview_message', 'idx_interview_message_session_sequence_id', 'create index idx_interview_message_session_sequence_id on interview_message (session_id, sequence_no, id)');
 
 create table if not exists interview_report (
     id bigint not null auto_increment comment '面试报告ID',
@@ -222,11 +288,75 @@ create table if not exists interview_report (
     raw_report_json text null comment '原始报告JSON',
     created_at datetime not null comment '创建时间',
     primary key (id),
-    unique key uk_interview_report_session_id (session_id)
+    unique key uk_interview_report_session_id (session_id),
+    key idx_interview_report_created_at (created_at),
+    key idx_interview_report_recommendation_created_at (recommendation, created_at)
 ) engine = InnoDB
   default charset = utf8mb4
   collate = utf8mb4_0900_ai_ci
   comment = '面试评估报告表';
+
+call add_index_if_missing('job_position', 'idx_job_position_created_at', 'create index idx_job_position_created_at on job_position (created_at)');
+call add_index_if_missing('job_position', 'idx_job_position_status_created_at', 'create index idx_job_position_status_created_at on job_position (status, created_at)');
+call add_index_if_missing('interview_report', 'idx_interview_report_created_at', 'create index idx_interview_report_created_at on interview_report (created_at)');
+call add_index_if_missing('interview_report', 'idx_interview_report_recommendation_created_at', 'create index idx_interview_report_recommendation_created_at on interview_report (recommendation, created_at)');
+
+create table if not exists ai_interview_setting (
+    id bigint not null comment '配置ID，全局配置固定为1',
+    target_question_count int not null comment '目标提问数量，AI接近该数量后开始收尾',
+    max_question_count int not null comment '最大提问数量，达到后停止追问',
+    closing_follow_up_turn_limit int not null default 1 comment '达到最大提问数后允许候选人补充说明或反问的轮次数',
+    max_follow_up_per_topic int not null comment '同一能力点或同一项目连续追问上限',
+    min_effective_answer_count int not null comment '最低有效回答轮次',
+    insufficient_answer_max_score int not null comment '有效回答轮次不足时最高总分',
+    no_evidence_max_score int not null comment '没有真实案例或细节时最高总分',
+    weak_job_match_max_score int not null comment '岗位匹配度较弱时最高总分',
+    weak_answer_max_score int not null comment '回答有效性明显不足时最高总分',
+    candidate_question_answer_guide text null comment '候选人反问回答口径',
+    updated_at datetime not null comment '更新时间',
+    primary key (id)
+) engine = InnoDB
+  default charset = utf8mb4
+  collate = utf8mb4_0900_ai_ci
+  comment = 'AI面试边界配置表';
+
+call add_column_if_missing('ai_interview_setting', 'candidate_question_answer_guide', 'alter table ai_interview_setting add column candidate_question_answer_guide text null comment ''候选人反问回答口径'' after weak_answer_max_score');
+call add_column_if_missing('ai_interview_setting', 'closing_follow_up_turn_limit', 'alter table ai_interview_setting add column closing_follow_up_turn_limit int not null default 1 comment ''达到最大提问数后允许候选人补充说明或反问的轮次数'' after max_question_count');
+
+insert into ai_interview_setting (
+    id,
+    target_question_count,
+    max_question_count,
+    closing_follow_up_turn_limit,
+    max_follow_up_per_topic,
+    min_effective_answer_count,
+    insufficient_answer_max_score,
+    no_evidence_max_score,
+    weak_job_match_max_score,
+    weak_answer_max_score,
+    candidate_question_answer_guide,
+    updated_at
+)
+select 1, 8, 12, 1, 2, 2, 60, 70, 74, 59, '试岗期/试岗：7天
+作息时间/上下班/大小周/休息时间：大小周，9:30 到 18:00
+工资发放时间/发薪日/几号发工资：每月18号
+薪资结构/工资/底薪/提成/业绩/奖金/薪酬：由线下面试 HR 进一步沟通确认，不回答金额、比例或规则
+试用期/福利/调休/加班/社保/公积金：以 HR 后续正式沟通为准', now()
+where not exists (select 1 from ai_interview_setting where id = 1);
+
+update ai_interview_setting
+set closing_follow_up_turn_limit = 1
+where id = 1
+  and closing_follow_up_turn_limit is null;
+
+update ai_interview_setting
+set candidate_question_answer_guide = '试岗期/试岗：7天
+作息时间/上下班/大小周/休息时间：大小周，9:30 到 18:00
+工资发放时间/发薪日/几号发工资：每月18号
+薪资结构/工资/底薪/提成/业绩/奖金/薪酬：由线下面试 HR 进一步沟通确认，不回答金额、比例或规则
+试用期/福利/调休/加班/社保/公积金：以 HR 后续正式沟通为准'
+where id = 1
+  and (candidate_question_answer_guide is null or candidate_question_answer_guide = '');
 
 -- 初始化管理员账号示例：
 -- 密码请使用 BCrypt 生成后写入 password_hash，不要存储明文密码。
@@ -254,6 +384,9 @@ where not exists (select 1 from rbac_permission where code = 'menu:candidates');
 insert into rbac_permission (parent_id, code, permission_key, name, type, resource_path, component, description, sort_no, status, created_at, updated_at)
 select 0, 'menu:interviews', 'interviews', '面试管理', 'MENU', null, 'interviews', '面试管理菜单', 3000, 'ENABLED', now(), now()
 where not exists (select 1 from rbac_permission where code = 'menu:interviews');
+insert into rbac_permission (parent_id, code, permission_key, name, type, resource_path, component, description, sort_no, status, created_at, updated_at)
+select 0, 'menu:aiSettings', 'aiSettings', 'AI面试配置', 'MENU', null, 'aiSettings', 'AI提问边界和评分边界配置菜单', 4000, 'ENABLED', now(), now()
+where not exists (select 1 from rbac_permission where code = 'menu:aiSettings');
 insert into rbac_permission (parent_id, code, permission_key, name, type, resource_path, component, description, sort_no, status, created_at, updated_at)
 select 0, 'menu:rbac', 'rbac', '权限管理', 'MENU', null, 'rbac', '权限管理父菜单', 9000, 'ENABLED', now(), now()
 where not exists (select 1 from rbac_permission where code = 'menu:rbac');
@@ -321,11 +454,25 @@ insert into rbac_permission (code, name, type, resource_path, description, sort_
 select 'interview:access-code-reset', '重置面试口令', 'API', '/api/interviews/access-code/reset', '重置面试访问口令', 430, 'ENABLED', now(), now()
 where not exists (select 1 from rbac_permission where code = 'interview:access-code-reset');
 insert into rbac_permission (code, name, type, resource_path, description, sort_no, status, created_at, updated_at)
-select 'interview:messages-list', '查询面试消息', 'API', '/api/interviews/messages/list', '查询面试消息记录', 440, 'ENABLED', now(), now()
+select 'interview:finish', '结束面试', 'API', '/api/interviews/finish', '后台结束面试并触发报告生成', 440, 'ENABLED', now(), now()
+where not exists (select 1 from rbac_permission where code = 'interview:finish');
+insert into rbac_permission (code, name, type, resource_path, description, sort_no, status, created_at, updated_at)
+select 'interview:messages-list', '查询面试消息', 'API', '/api/interviews/messages/list', '查询面试消息记录', 450, 'ENABLED', now(), now()
 where not exists (select 1 from rbac_permission where code = 'interview:messages-list');
 insert into rbac_permission (code, name, type, resource_path, description, sort_no, status, created_at, updated_at)
-select 'interview:report-detail', '查询面试报告', 'API', '/api/interviews/reports/detail', '查询面试评估报告', 450, 'ENABLED', now(), now()
+select 'interview:report-detail', '查询面试报告', 'API', '/api/interviews/reports/detail', '查询面试评估报告', 460, 'ENABLED', now(), now()
 where not exists (select 1 from rbac_permission where code = 'interview:report-detail');
+
+insert into rbac_permission (parent_id, code, name, type, resource_path, description, sort_no, status, created_at, updated_at)
+select parent.id, 'ai-setting:detail', '查询AI面试配置', 'API', '/api/settings/ai-interview/detail', '查询AI提问边界和评分边界配置', 460, 'ENABLED', now(), now()
+from rbac_permission parent
+where parent.code = 'menu:aiSettings'
+  and not exists (select 1 from rbac_permission where code = 'ai-setting:detail');
+insert into rbac_permission (parent_id, code, name, type, resource_path, description, sort_no, status, created_at, updated_at)
+select parent.id, 'ai-setting:update', '更新AI面试配置', 'API', '/api/settings/ai-interview/update', '更新AI提问边界和评分边界配置', 470, 'ENABLED', now(), now()
+from rbac_permission parent
+where parent.code = 'menu:aiSettings'
+  and not exists (select 1 from rbac_permission where code = 'ai-setting:update');
 
 insert into rbac_permission (code, name, type, resource_path, description, sort_no, status, created_at, updated_at)
 select 'rbac:role:list', '查询角色列表', 'API', '/api/rbac/roles/list', '查询RBAC角色列表', 500, 'ENABLED', now(), now()
@@ -384,7 +531,12 @@ where child.code in ('candidate:create', 'candidate:update', 'candidate:delete',
 update rbac_permission child
 join rbac_permission parent on parent.code = 'menu:interviews'
 set child.parent_id = parent.id
-where child.code in ('interview:create', 'interview:detail', 'interview:list', 'interview:access-code-reset', 'interview:messages-list', 'interview:report-detail');
+where child.code in ('interview:create', 'interview:detail', 'interview:list', 'interview:access-code-reset', 'interview:finish', 'interview:messages-list', 'interview:report-detail');
+
+update rbac_permission child
+join rbac_permission parent on parent.code = 'menu:aiSettings'
+set child.parent_id = parent.id
+where child.code in ('ai-setting:detail', 'ai-setting:update');
 
 update rbac_permission child
 join rbac_permission parent on parent.code = 'menu:rbac:menus'
@@ -413,3 +565,6 @@ insert ignore into rbac_user_role (user_id, role_id, created_at)
 select u.id, r.id, now()
 from hr_user u
 join rbac_role r on r.code = u.role;
+
+drop procedure if exists add_column_if_missing;
+drop procedure if exists add_index_if_missing;

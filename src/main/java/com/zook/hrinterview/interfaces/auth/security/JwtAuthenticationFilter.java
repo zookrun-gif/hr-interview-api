@@ -1,6 +1,7 @@
 package com.zook.hrinterview.interfaces.auth.security;
 
 import com.zook.hrinterview.common.BusinessException;
+import com.zook.hrinterview.common.enums.RedisKeyEnum;
 import com.zook.hrinterview.common.ErrorCode;
 import com.zook.hrinterview.utils.RedisUtils;
 import org.springframework.http.HttpHeaders;
@@ -26,7 +27,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     public static final String TOKEN_PREFIX = "Bearer ";
 
-    public static final String LOGIN_TOKEN_KEY_PREFIX = "auth:token:";
+    public static final String ACCESS_LOG_USER_ID_ATTR = "accessLogUserId";
 
     private final JwtTokenProvider jwtTokenProvider;
 
@@ -51,12 +52,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             String token = resolveToken(request);
             if (StringUtils.hasText(token)) {
-                String tokenKey = LOGIN_TOKEN_KEY_PREFIX + token;
-                if (!Boolean.TRUE.equals(redisUtils.hasKey(tokenKey))) {
+                Object cachedLoginUser = redisUtils.get(RedisKeyEnum.AUTH_LOGIN_TOKEN, token);
+                if (cachedLoginUser == null) {
                     throw new BusinessException(ErrorCode.UNAUTHORIZED);
                 }
-                LoginUser loginUser = jwtTokenProvider.parseToken(token);
+                LoginUser loginUser = cachedLoginUser instanceof LoginUser
+                        ? (LoginUser) cachedLoginUser
+                        : jwtTokenProvider.parseToken(token);
                 LoginUserContext.set(loginUser);
+                request.setAttribute(ACCESS_LOG_USER_ID_ATTR, loginUser.getId());
                 UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                         loginUser,
                         null,

@@ -1,4 +1,4 @@
-package com.zook.hrinterview.realtime;
+package com.zook.hrinterview.realtime.protocol;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;

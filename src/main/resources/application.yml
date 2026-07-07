@@ -21,6 +21,19 @@ mybatis-plus:
 knife4j:
   enable: true
 
+interview:
+  realtime:
+    capacity:
+      max-online-sessions: 20
+  report:
+    queue:
+      enabled: true
+      poll-interval-millis: 3000
+      batch-size: 1
+      max-retry-times: 2
+      recover-processing-on-startup: true
+      startup-recover-limit: 200
+
 logging:
   file:
     path: logs
@@ -29,3 +42,8 @@ logging:
       max-history: 30
       max-file-size: 100MB
       total-size-cap: 10GB
+
+app:
+  api-access-log:
+    enabled: true
+    include-body: false

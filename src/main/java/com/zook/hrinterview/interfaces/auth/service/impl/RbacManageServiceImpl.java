@@ -7,6 +7,7 @@ import com.zook.hrinterview.common.BusinessException;
 import com.zook.hrinterview.common.ErrorCode;
 import com.zook.hrinterview.common.IdRequest;
 import com.zook.hrinterview.common.PageResponse;
+import com.zook.hrinterview.common.enums.RedisKeyEnum;
 import com.zook.hrinterview.interfaces.auth.dto.RbacPermissionResponse;
 import com.zook.hrinterview.interfaces.auth.dto.RbacPermissionCreateRequest;
 import com.zook.hrinterview.interfaces.auth.dto.RbacPermissionUpdateRequest;
@@ -33,6 +34,7 @@ import com.zook.hrinterview.interfaces.auth.mapper.RbacRoleMapper;
 import com.zook.hrinterview.interfaces.auth.mapper.RbacRolePermissionMapper;
 import com.zook.hrinterview.interfaces.auth.mapper.RbacUserRoleMapper;
 import com.zook.hrinterview.interfaces.auth.service.RbacManageService;
+import com.zook.hrinterview.utils.RedisUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -45,7 +47,9 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -85,8 +89,13 @@ public class RbacManageServiceImpl implements RbacManageService {
             new BuiltinPermission("menu:interviews", "interview:detail", null, "查询面试详情", TYPE_API, "/api/interviews/detail", null, "查询面试会话详情", 3020),
             new BuiltinPermission("menu:interviews", "interview:list", null, "查询面试列表", TYPE_API, "/api/interviews/list", null, "查询面试会话列表", 3030),
             new BuiltinPermission("menu:interviews", "interview:access-code-reset", null, "重置面试口令", TYPE_API, "/api/interviews/access-code/reset", null, "重置面试访问口令", 3040),
-            new BuiltinPermission("menu:interviews", "interview:messages-list", null, "查询面试消息", TYPE_API, "/api/interviews/messages/list", null, "查询面试消息记录", 3050),
-            new BuiltinPermission("menu:interviews", "interview:report-detail", null, "查询面试报告", TYPE_API, "/api/interviews/reports/detail", null, "查询面试评估报告", 3060),
+            new BuiltinPermission("menu:interviews", "interview:finish", null, "结束面试", TYPE_API, "/api/interviews/finish", null, "后台结束面试并触发报告生成", 3050),
+            new BuiltinPermission("menu:interviews", "interview:messages-list", null, "查询面试消息", TYPE_API, "/api/interviews/messages/list", null, "查询面试消息记录", 3060),
+            new BuiltinPermission("menu:interviews", "interview:report-detail", null, "查询面试报告", TYPE_API, "/api/interviews/reports/detail", null, "查询面试评估报告", 3070),
+
+            new BuiltinPermission(null, "menu:aiSettings", "aiSettings", "AI面试配置", TYPE_MENU, null, "aiSettings", "AI提问边界和评分边界配置菜单", 4000),
+            new BuiltinPermission("menu:aiSettings", "ai-setting:detail", null, "查询AI面试配置", TYPE_API, "/api/settings/ai-interview/detail", null, "查询AI提问边界和评分边界配置", 4010),
+            new BuiltinPermission("menu:aiSettings", "ai-setting:update", null, "更新AI面试配置", TYPE_API, "/api/settings/ai-interview/update", null, "更新AI提问边界和评分边界配置", 4020),
 
             new BuiltinPermission(null, "menu:rbac", "rbac", "权限管理", TYPE_MENU, null, "rbac", "权限管理父菜单", 9000),
             new BuiltinPermission("menu:rbac", "menu:rbac:menus", "rbacMenus", "菜单管理", TYPE_MENU, null, "rbacMenus", "菜单、按钮和接口权限管理", 9010),
@@ -125,6 +134,9 @@ public class RbacManageServiceImpl implements RbacManageService {
 
     @Resource
     private PasswordEncoder passwordEncoder;
+
+    @Resource
+    private RedisUtils redisUtils;
 
     @Override
     public PageResponse<RbacRoleResponse> listRoles(RbacRoleListRequest request) {
@@ -184,8 +196,12 @@ public class RbacManageServiceImpl implements RbacManageService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public List<RbacPermissionResponse> listPermissions() {
-        ensureBuiltinPermissionTree();
-        return rbacPermissionMapper.selectList(
+        ensureBuiltinPermissionTreeIfNeeded();
+        List<RbacPermissionResponse> cached = getCachedPermissionList();
+        if (cached != null) {
+            return cached;
+        }
+        List<RbacPermissionResponse> permissions = rbacPermissionMapper.selectList(
                         Wrappers.lambdaQuery(RbacPermission.class)
                                 .orderByAsc(RbacPermission::getParentId)
                                 .orderByAsc(RbacPermission::getSortNo)
@@ -194,6 +210,8 @@ public class RbacManageServiceImpl implements RbacManageService {
                 .filter(permission -> !BASIC_AUTH_PERMISSION_CODES.contains(permission.getCode()))
                 .map(this::toPermissionResponse)
                 .collect(Collectors.toList());
+        redisUtils.set(RedisKeyEnum.RBAC_PERMISSION_LIST, permissions);
+        return permissions;
     }
 
     @Override
@@ -216,6 +234,7 @@ public class RbacManageServiceImpl implements RbacManageService {
         permission.setSortNo(request.getSortNo());
         permission.setStatus(request.getStatus());
         rbacPermissionMapper.insert(permission);
+        clearPermissionCache();
         return toPermissionResponse(permission);
     }
 
@@ -233,6 +252,7 @@ public class RbacManageServiceImpl implements RbacManageService {
         permission.setSortNo(request.getSortNo());
         permission.setStatus(request.getStatus());
         rbacPermissionMapper.updateById(permission);
+        clearPermissionCache();
         return toPermissionResponse(permission);
     }
 
@@ -248,6 +268,7 @@ public class RbacManageServiceImpl implements RbacManageService {
         rbacRolePermissionMapper.delete(
                 Wrappers.lambdaQuery(RbacRolePermission.class).eq(RbacRolePermission::getPermissionId, request.getId()));
         rbacPermissionMapper.deleteById(request.getId());
+        clearPermissionCache();
         return Boolean.TRUE;
     }
 
@@ -443,6 +464,29 @@ public class RbacManageServiceImpl implements RbacManageService {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
+    private void ensureBuiltinPermissionTreeIfNeeded() {
+        String signature = builtinPermissionSignature();
+        Object syncedSignature = redisUtils.get(RedisKeyEnum.RBAC_BUILTIN_PERMISSION_SYNC);
+        if (Objects.equals(signature, syncedSignature)) {
+            return;
+        }
+        String lockValue = UUID.randomUUID().toString();
+        if (!Boolean.TRUE.equals(redisUtils.tryLock(RedisKeyEnum.RBAC_BUILTIN_PERMISSION_SYNC_LOCK, "", lockValue))) {
+            return;
+        }
+        try {
+            Object latestSignature = redisUtils.get(RedisKeyEnum.RBAC_BUILTIN_PERMISSION_SYNC);
+            if (Objects.equals(signature, latestSignature)) {
+                return;
+            }
+            ensureBuiltinPermissionTree();
+            redisUtils.set(RedisKeyEnum.RBAC_BUILTIN_PERMISSION_SYNC, signature);
+            redisUtils.delete(RedisKeyEnum.RBAC_PERMISSION_LIST);
+        } finally {
+            redisUtils.unlock(RedisKeyEnum.RBAC_BUILTIN_PERMISSION_SYNC_LOCK, "", lockValue);
+        }
+    }
+
     private void ensureBuiltinPermissionTree() {
         Map<String, RbacPermission> permissionMap = rbacPermissionMapper.selectList(Wrappers.lambdaQuery(RbacPermission.class))
                 .stream()
@@ -466,6 +510,42 @@ public class RbacManageServiceImpl implements RbacManageService {
         }
 
         grantBuiltinPermissionsToAdmin(permissionMap);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<RbacPermissionResponse> getCachedPermissionList() {
+        Object cached = redisUtils.get(RedisKeyEnum.RBAC_PERMISSION_LIST);
+        if (cached == null) {
+            return null;
+        }
+        if (cached instanceof List<?>) {
+            return ((List<?>) cached).stream()
+                    .filter(RbacPermissionResponse.class::isInstance)
+                    .map(RbacPermissionResponse.class::cast)
+                    .collect(Collectors.toList());
+        }
+        redisUtils.delete(RedisKeyEnum.RBAC_PERMISSION_LIST);
+        return null;
+    }
+
+    private void clearPermissionCache() {
+        redisUtils.delete(RedisKeyEnum.RBAC_PERMISSION_LIST);
+        redisUtils.delete(RedisKeyEnum.RBAC_BUILTIN_PERMISSION_SYNC);
+    }
+
+    private String builtinPermissionSignature() {
+        return BUILTIN_PERMISSIONS.stream()
+                .map(permission -> String.join("|",
+                        String.valueOf(permission.parentCode()),
+                        permission.code(),
+                        String.valueOf(permission.permissionKey()),
+                        permission.name(),
+                        permission.type(),
+                        String.valueOf(permission.resourcePath()),
+                        String.valueOf(permission.component()),
+                        String.valueOf(permission.description()),
+                        String.valueOf(permission.sortNo())))
+                .collect(Collectors.joining(";"));
     }
 
     private Long resolveParentId(Map<String, RbacPermission> permissionMap, String parentCode) {

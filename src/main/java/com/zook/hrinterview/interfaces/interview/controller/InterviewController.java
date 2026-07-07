@@ -55,6 +55,12 @@ public class InterviewController {
         return ApiResponse.success(interviewService.resetAccessCode(request));
     }
 
+    @ApiOperation("结束面试并生成报告")
+    @PostMapping("/finish")
+    public ApiResponse<InterviewDetailResponse> finish(@Valid @RequestBody IdRequest request) {
+        return ApiResponse.success(interviewService.finish(request));
+    }
+
     @ApiOperation("查询面试消息")
     @PostMapping("/messages/list")
     public ApiResponse<List<InterviewMessageResponse>> listMessages(@Valid @RequestBody InterviewMessageListRequest request) {

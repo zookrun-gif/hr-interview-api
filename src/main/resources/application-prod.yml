@@ -34,6 +34,24 @@ spring:
 knife4j:
   enable: false
 
+openai:
+  chat:
+    enabled: ${OPENAI_CHAT_ENABLED:true}
+    base-url: ${OPENAI_CHAT_BASE_URL:http://106.55.174.126:30088/v1}
+    api-key: ${OPENAI_CHAT_API_KEY:}
+    model: ${OPENAI_CHAT_MODEL:gpt-5.4-mini}
+    timeout-seconds: ${OPENAI_CHAT_TIMEOUT_SECONDS:60}
+
+ai:
+  interview-report:
+    enabled: ${AI_INTERVIEW_REPORT_ENABLED:true}
+    max-content-chars: ${AI_INTERVIEW_REPORT_MAX_CONTENT_CHARS:18000}
+    min-effective-answer-count: ${AI_INTERVIEW_REPORT_MIN_EFFECTIVE_ANSWER_COUNT:2}
+    insufficient-answer-max-score: ${AI_INTERVIEW_REPORT_INSUFFICIENT_ANSWER_MAX_SCORE:60}
+    no-evidence-max-score: ${AI_INTERVIEW_REPORT_NO_EVIDENCE_MAX_SCORE:70}
+    weak-job-match-max-score: ${AI_INTERVIEW_REPORT_WEAK_JOB_MATCH_MAX_SCORE:74}
+    weak-answer-max-score: ${AI_INTERVIEW_REPORT_WEAK_ANSWER_MAX_SCORE:59}
+
 volcengine:
   realtime:
     ws-url: wss://openspeech.bytedance.com/api/v3/realtime/dialogue
@@ -41,6 +59,8 @@ volcengine:
     access-key: ${VOLCENGINE_REALTIME_ACCESS_KEY:}
     resource-id: ${VOLCENGINE_REALTIME_RESOURCE_ID:volc.speech.dialog}
     app-key: ${VOLCENGINE_REALTIME_APP_KEY:}
+    websocket-client: ${VOLCENGINE_REALTIME_WEBSOCKET_CLIENT:okhttp}
+    connect-timeout-seconds: ${VOLCENGINE_REALTIME_CONNECT_TIMEOUT_SECONDS:10}
     speaker: ${VOLCENGINE_REALTIME_SPEAKER:zh_female_vv_jupiter_bigtts}
     dialog-model: ${VOLCENGINE_REALTIME_DIALOG_MODEL:1.2.1.1}
     input-audio-format: pcm_s16le
@@ -48,15 +68,11 @@ volcengine:
     sample-rate: 16000
     output-sample-rate: 24000
     channel: 1
+    target-question-count: ${VOLCENGINE_REALTIME_TARGET_QUESTION_COUNT:8}
+    max-question-count: ${VOLCENGINE_REALTIME_MAX_QUESTION_COUNT:12}
+    closing-follow-up-turn-limit: ${VOLCENGINE_REALTIME_CLOSING_FOLLOW_UP_TURN_LIMIT:1}
+    max-follow-up-per-topic: ${VOLCENGINE_REALTIME_MAX_FOLLOW_UP_PER_TOPIC:2}
     instructions: 你是一名专业、友善、克制的 AI 面试官。请围绕岗位 JD、能力要求和候选人简历进行中文面试。每次只问一个问题，问题要清晰、具体、适合口语回答。
-  resume-ai:
-    enabled: true
-    base-url: ${VOLCENGINE_RESUME_AI_BASE_URL:https://ark.cn-beijing.volces.com/api/v3/chat/completions}
-    api-key: ${VOLCENGINE_RESUME_AI_API_KEY:}
-    model: ${VOLCENGINE_RESUME_AI_MODEL:}
-    timeout-seconds: 30
-    max-resume-chars: 12000
-
 wecom:
   enabled: true
   corp-id: ${WECOM_CORP_ID:}

@@ -6,11 +6,11 @@ import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.zook.hrinterview.interfaces.auth.security.LoginUserContext;
 import com.zook.hrinterview.common.BusinessException;
 import com.zook.hrinterview.common.ErrorCode;
 import com.zook.hrinterview.common.IdRequest;
 import com.zook.hrinterview.common.PageResponse;
+import com.zook.hrinterview.interfaces.auth.security.LoginUserContext;
 import com.zook.hrinterview.interfaces.candidate.entity.Candidate;
 import com.zook.hrinterview.interfaces.candidate.mapper.CandidateMapper;
 import com.zook.hrinterview.interfaces.interview.entity.InterviewSession;
@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -128,8 +129,14 @@ public class JobServiceImpl extends ServiceImpl<JobPositionMapper, JobPosition> 
     }
 
     private void saveDimensions(Long jobId, List<EvaluationDimensionRequest> dimensions) {
+        List<EvaluationDimension> entities = buildDimensionEntities(jobId, dimensions);
+        entities.forEach(evaluationDimensionMapper::insert);
+    }
+
+    private List<EvaluationDimension> buildDimensionEntities(Long jobId, List<EvaluationDimensionRequest> dimensions) {
+        List<EvaluationDimension> entities = new ArrayList<>();
         if (dimensions == null || dimensions.isEmpty()) {
-            return;
+            return entities;
         }
         for (EvaluationDimensionRequest request : dimensions) {
             if (request == null || StringUtils.isBlank(request.getName()) || request.getWeight() == null) {
@@ -140,8 +147,9 @@ public class JobServiceImpl extends ServiceImpl<JobPositionMapper, JobPosition> 
             dimension.setName(request.getName());
             dimension.setDescription(request.getDescription());
             dimension.setWeight(request.getWeight());
-            evaluationDimensionMapper.insert(dimension);
+            entities.add(dimension);
         }
+        return entities;
     }
 
     private JobDetailResponse detailById(Long id) {
@@ -162,7 +170,9 @@ public class JobServiceImpl extends ServiceImpl<JobPositionMapper, JobPosition> 
 
     private List<EvaluationDimensionResponse> listDimensionResponses(Long jobId) {
         List<EvaluationDimension> dimensions = evaluationDimensionMapper.selectList(
-                Wrappers.lambdaQuery(EvaluationDimension.class).eq(EvaluationDimension::getJobId, jobId));
+                Wrappers.lambdaQuery(EvaluationDimension.class)
+                        .eq(EvaluationDimension::getJobId, jobId)
+                        .orderByAsc(EvaluationDimension::getId));
         if (dimensions == null) {
             return Collections.emptyList();
         }

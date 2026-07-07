@@ -8,6 +8,7 @@ public enum ErrorCode {
     RESOURCE_NOT_FOUND(404001, "资源不存在"),
     INTERVIEW_STATUS_INVALID(409001, "面试状态不允许该操作"),
     INTERVIEW_ACCESS_CODE_INVALID(409002, "面试口令不正确"),
+    TOO_MANY_REQUESTS(429001, "请求过于频繁"),
     MODEL_SERVICE_ERROR(502001, "AI 服务暂时不可用"),
     SYSTEM_ERROR(500001, "系统异常");
 

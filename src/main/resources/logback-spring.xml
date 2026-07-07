@@ -85,8 +85,8 @@
     <logger name="com.alibaba.druid" level="WARN"/>
 
     <springProfile name="test">
-        <logger name="com.zook.hrinterview" level="DEBUG"/>
-        <logger name="com.zook.hrinterview.interfaces" level="DEBUG"/>
+        <logger name="com.zook.hrinterview" level="INFO"/>
+        <logger name="com.zook.hrinterview.interfaces" level="INFO"/>
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE_ALL"/>

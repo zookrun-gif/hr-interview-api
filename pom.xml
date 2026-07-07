@@ -25,6 +25,7 @@
         <mysql.version>8.0.33</mysql.version>
         <druid.version>1.2.23</druid.version>
         <pdfbox.version>2.0.31</pdfbox.version>
+        <okhttp.version>4.12.0</okhttp.version>
     </properties>
 
     <dependencies>
@@ -73,6 +74,11 @@
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
             <version>${pdfbox.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>${okhttp.version}</version>
         </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

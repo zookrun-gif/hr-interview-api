@@ -4,23 +4,32 @@ import com.zook.hrinterview.interfaces.interview.service.InterviewService;
 import com.zook.hrinterview.interfaces.interview.service.PublicInterviewService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.zook.hrinterview.common.BusinessException;
+import com.zook.hrinterview.common.enums.RedisKeyEnum;
 import com.zook.hrinterview.common.ErrorCode;
 import com.zook.hrinterview.common.IdRequest;
 import com.zook.hrinterview.interfaces.interview.InterviewStatus;
 import com.zook.hrinterview.interfaces.interview.dto.InterviewDetailResponse;
+import com.zook.hrinterview.interfaces.interview.dto.InterviewMessageListRequest;
+import com.zook.hrinterview.interfaces.interview.dto.InterviewMessageResponse;
 import com.zook.hrinterview.interfaces.interview.dto.PublicInterviewEnterRequest;
+import com.zook.hrinterview.interfaces.interview.dto.PublicInterviewMessageListRequest;
 import com.zook.hrinterview.interfaces.interview.dto.PublicInterviewTokenRequest;
 import com.zook.hrinterview.interfaces.interview.dto.RealtimeConnectRequest;
 import com.zook.hrinterview.interfaces.interview.dto.RealtimeConnectResponse;
 import com.zook.hrinterview.interfaces.interview.entity.InterviewSession;
 import com.zook.hrinterview.interfaces.interview.mapper.InterviewSessionMapper;
 import com.zook.hrinterview.config.VolcengineRealtimeProperties;
-import com.zook.hrinterview.realtime.RealtimeTicketService;
+import com.zook.hrinterview.realtime.service.RealtimeTicketService;
+import com.zook.hrinterview.utils.RedisUtils;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Base64;
+import java.util.List;
 
 @Service
 public class PublicInterviewServiceImpl implements PublicInterviewService {
@@ -39,6 +48,9 @@ public class PublicInterviewServiceImpl implements PublicInterviewService {
 
     @Resource
     private VolcengineRealtimeProperties volcengineRealtimeProperties;
+
+    @Resource
+    private RedisUtils redisUtils;
 
     @Override
     public InterviewDetailResponse detail(PublicInterviewTokenRequest request) {
@@ -89,18 +101,55 @@ public class PublicInterviewServiceImpl implements PublicInterviewService {
         return response;
     }
 
+    @Override
+    public List<InterviewMessageResponse> listMessages(PublicInterviewMessageListRequest request) {
+        InterviewSession session = mustGetByToken(request.getToken());
+        verifyAccessCode(session, request.getAccessCode());
+        InterviewMessageListRequest messageRequest = new InterviewMessageListRequest();
+        messageRequest.setSessionId(session.getId());
+        return interviewService.listMessages(messageRequest);
+    }
+
     private InterviewSession mustGetByToken(String token) {
-        InterviewSession session = interviewSessionMapper.selectOne(
-                Wrappers.lambdaQuery(InterviewSession.class).eq(InterviewSession::getInviteToken, token));
+        InterviewSession session = null;
+        Object cachedSessionId = redisUtils.get(RedisKeyEnum.INTERVIEW_PUBLIC_TOKEN, token);
+        if (cachedSessionId != null) {
+            session = interviewSessionMapper.selectById(Long.valueOf(String.valueOf(cachedSessionId)));
+        }
         if (session == null) {
+            session = interviewSessionMapper.selectOne(
+                    Wrappers.lambdaQuery(InterviewSession.class).eq(InterviewSession::getInviteToken, token));
+            if (session != null) {
+                redisUtils.set(RedisKeyEnum.INTERVIEW_PUBLIC_TOKEN, token, session.getId());
+            }
+        }
+        if (session == null) {
+            redisUtils.delete(RedisKeyEnum.INTERVIEW_PUBLIC_TOKEN, token);
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "面试链接不存在或已失效");
         }
         return session;
     }
 
     private void verifyAccessCode(InterviewSession session, String accessCode) {
+        String cacheData = accessCacheData(session, accessCode);
+        Object cachedSessionId = redisUtils.get(RedisKeyEnum.INTERVIEW_PUBLIC_ACCESS, cacheData);
+        if (cachedSessionId != null && String.valueOf(session.getId()).equals(String.valueOf(cachedSessionId))) {
+            return;
+        }
         if (!StringUtils.hasText(session.getAccessCodeHash()) || !passwordEncoder.matches(accessCode, session.getAccessCodeHash())) {
+            redisUtils.delete(RedisKeyEnum.INTERVIEW_PUBLIC_ACCESS, cacheData);
             throw new BusinessException(ErrorCode.INTERVIEW_ACCESS_CODE_INVALID);
+        }
+        redisUtils.set(RedisKeyEnum.INTERVIEW_PUBLIC_ACCESS, cacheData, session.getId());
+    }
+
+    private String accessCacheData(InterviewSession session, String accessCode) {
+        String raw = session.getId() + ":" + session.getAccessCodeHash() + ":" + accessCode;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return Base64.getEncoder().encodeToString(digest.digest(raw.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception ex) {
+            return raw;
         }
     }
 }

@@ -2,7 +2,9 @@ package com.zook.hrinterview.interfaces.interview.controller;
 
 import com.zook.hrinterview.common.ApiResponse;
 import com.zook.hrinterview.interfaces.interview.dto.InterviewDetailResponse;
+import com.zook.hrinterview.interfaces.interview.dto.InterviewMessageResponse;
 import com.zook.hrinterview.interfaces.interview.dto.PublicInterviewEnterRequest;
+import com.zook.hrinterview.interfaces.interview.dto.PublicInterviewMessageListRequest;
 import com.zook.hrinterview.interfaces.interview.dto.PublicInterviewTokenRequest;
 import com.zook.hrinterview.interfaces.interview.dto.RealtimeConnectRequest;
 import com.zook.hrinterview.interfaces.interview.dto.RealtimeConnectResponse;
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import javax.annotation.Resource;
 import javax.validation.Valid;
+import java.util.List;
 
 @Api(tags = "候选人公开面试")
 @RestController
@@ -47,5 +50,11 @@ public class PublicInterviewController {
     @PostMapping("/realtime/connect")
     public ApiResponse<RealtimeConnectResponse> connectRealtime(@Valid @RequestBody RealtimeConnectRequest request) {
         return ApiResponse.success(publicInterviewService.connectRealtime(request));
+    }
+
+    @ApiOperation("查询公开面试消息")
+    @PostMapping("/messages/list")
+    public ApiResponse<List<InterviewMessageResponse>> listMessages(@Valid @RequestBody PublicInterviewMessageListRequest request) {
+        return ApiResponse.success(publicInterviewService.listMessages(request));
     }
 }

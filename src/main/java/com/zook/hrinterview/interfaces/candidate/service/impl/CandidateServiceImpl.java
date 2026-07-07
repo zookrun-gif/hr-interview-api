@@ -14,7 +14,6 @@ import com.zook.hrinterview.interfaces.candidate.dto.CandidateUpdateRequest;
 import com.zook.hrinterview.interfaces.candidate.dto.ResumeParseResponse;
 import com.zook.hrinterview.interfaces.candidate.entity.Candidate;
 import com.zook.hrinterview.interfaces.candidate.mapper.CandidateMapper;
-import com.zook.hrinterview.interfaces.candidate.service.ResumeAiParseService;
 import com.zook.hrinterview.common.BusinessException;
 import com.zook.hrinterview.common.ErrorCode;
 import com.zook.hrinterview.common.IdRequest;
@@ -39,7 +38,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -55,9 +56,6 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
 
     @Resource
     private InterviewSessionMapper interviewSessionMapper;
-
-    @Resource
-    private ResumeAiParseService resumeAiParseService;
 
     @Override
     public CandidateDetailResponse create(CandidateCreateRequest request) {
@@ -129,8 +127,10 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
                         .like(Candidate::getEmail, request.getKeyword()))
                 .orderByDesc(Candidate::getCreatedAt);
         Page<Candidate> page = page(Page.of(request.getPageNo(), request.getPageSize()), wrapper);
-        List<CandidateDetailResponse> records = page.getRecords().stream()
-                .map(this::toDetailResponse)
+        Map<Long, JobPosition> jobMap = batchQueryJobs(page.getRecords());
+        List<CandidateDetailResponse> records = page.getRecords()
+                .stream()
+                .map(candidate -> toDetailResponse(candidate, jobMap.get(candidate.getJobId())))
                 .collect(Collectors.toList());
         return new PageResponse<>(records, page.getTotal(), page.getCurrent(), page.getSize());
     }
@@ -163,10 +163,8 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         response.setPlainText(plainText);
         response.setHtmlContent(toResumeHtml(plainText));
         String profileText = StringUtils.isBlank(extraction.profileText()) ? plainText : extraction.profileText();
-        if (!resumeAiParseService.fillProfile(response, profileText)) {
-            response.setAiParsed(Boolean.FALSE);
-            fillResumeProfile(response, profileText, fileName);
-        }
+        response.setAiParsed(Boolean.FALSE);
+        fillResumeProfile(response, profileText, fileName);
         return response;
     }
 
@@ -261,10 +259,14 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
     }
 
     private CandidateDetailResponse toDetailResponse(Candidate candidate) {
+        JobPosition job = candidate.getJobId() == null ? null : jobPositionMapper.selectById(candidate.getJobId());
+        return toDetailResponse(candidate, job);
+    }
+
+    private CandidateDetailResponse toDetailResponse(Candidate candidate, JobPosition job) {
         CandidateDetailResponse response = new CandidateDetailResponse();
         response.setId(candidate.getId());
         response.setJobId(candidate.getJobId());
-        JobPosition job = candidate.getJobId() == null ? null : jobPositionMapper.selectById(candidate.getJobId());
         response.setJobTitle(job == null ? "-" : job.getTitle());
         response.setName(candidate.getName());
         response.setGender(candidate.getGender());
@@ -275,6 +277,20 @@ public class CandidateServiceImpl extends ServiceImpl<CandidateMapper, Candidate
         response.setResumeFileUrl(candidate.getResumeFileUrl());
         response.setCreatedAt(candidate.getCreatedAt());
         return response;
+    }
+
+    private Map<Long, JobPosition> batchQueryJobs(List<Candidate> candidates) {
+        List<Long> jobIds = candidates.stream()
+                .map(Candidate::getJobId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, JobPosition> jobMap = new LinkedHashMap<>();
+        if (jobIds.isEmpty()) {
+            return jobMap;
+        }
+        jobPositionMapper.selectBatchIds(jobIds).forEach(job -> jobMap.put(job.getId(), job));
+        return jobMap;
     }
 
     private JobPosition mustGetJob(Long jobId) {

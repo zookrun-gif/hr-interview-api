@@ -4,6 +4,7 @@ import com.zook.hrinterview.config.WeComProperties;
 import com.zook.hrinterview.interfaces.auth.service.AuthService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.zook.hrinterview.common.constant.ThirdPartyApiConstant;
 import com.zook.hrinterview.interfaces.auth.dto.ChangePasswordRequest;
 import com.zook.hrinterview.interfaces.auth.dto.CurrentUserResponse;
 import com.zook.hrinterview.interfaces.auth.dto.LoginRequest;
@@ -22,18 +23,18 @@ import com.zook.hrinterview.interfaces.auth.security.JwtTokenProvider;
 import com.zook.hrinterview.interfaces.auth.security.LoginUser;
 import com.zook.hrinterview.interfaces.auth.security.LoginUserContext;
 import com.zook.hrinterview.common.BusinessException;
+import com.zook.hrinterview.common.enums.RedisKeyEnum;
 import com.zook.hrinterview.common.ErrorCode;
 import com.zook.hrinterview.interfaces.auth.service.RbacPermissionService;
 import com.zook.hrinterview.interfaces.auth.wecom.WeComTokenResponse;
 import com.zook.hrinterview.interfaces.auth.wecom.WeComUserDetailResponse;
 import com.zook.hrinterview.interfaces.auth.wecom.WeComUserInfoResponse;
+import com.zook.hrinterview.utils.HttpRestClient;
 import com.zook.hrinterview.utils.RedisUtils;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
@@ -49,12 +50,6 @@ public class AuthServiceImpl extends ServiceImpl<HrUserMapper, HrUser> implement
 
     private static final String STATUS_ENABLED = "ENABLED";
     private static final String ROLE_USER = "USER";
-    private static final String WECOM_STATE_KEY_PREFIX = "auth:wecom:state:";
-    private static final String WECOM_ACCESS_TOKEN_KEY = "auth:wecom:access-token";
-    private static final String WECOM_QR_LOGIN_URL = "https://open.work.weixin.qq.com/wwopen/sso/qrConnect";
-    private static final String WECOM_GET_TOKEN_URL = "https://qyapi.weixin.qq.com/cgi-bin/gettoken";
-    private static final String WECOM_GET_USER_INFO_URL = "https://qyapi.weixin.qq.com/cgi-bin/auth/getuserinfo";
-    private static final String WECOM_GET_USER_DETAIL_URL = "https://qyapi.weixin.qq.com/cgi-bin/user/get";
 
     @Resource
     private PasswordEncoder passwordEncoder;
@@ -77,6 +72,9 @@ public class AuthServiceImpl extends ServiceImpl<HrUserMapper, HrUser> implement
     @Resource
     private RbacUserRoleMapper rbacUserRoleMapper;
 
+    @Resource
+    private HttpRestClient httpRestClient;
+
     @Override
     public LoginResponse login(LoginRequest request) {
         HrUser user = getOne(Wrappers.lambdaQuery(HrUser.class).eq(HrUser::getEmail, request.getEmail()));
@@ -94,7 +92,7 @@ public class AuthServiceImpl extends ServiceImpl<HrUserMapper, HrUser> implement
     public WeComLoginConfigResponse wecomConfig() {
         validateWeComConfig(false);
         String state = UUID.randomUUID().toString().replace("-", "");
-        redisUtils.set(WECOM_STATE_KEY_PREFIX + state, "1", 5, TimeUnit.MINUTES);
+        redisUtils.set(RedisKeyEnum.AUTH_WECOM_STATE, state, "1");
 
         WeComLoginConfigResponse response = new WeComLoginConfigResponse();
         response.setEnabled(Boolean.TRUE.equals(weComProperties.getEnabled()));
@@ -110,11 +108,10 @@ public class AuthServiceImpl extends ServiceImpl<HrUserMapper, HrUser> implement
     @Transactional(rollbackFor = Exception.class)
     public LoginResponse wecomLogin(WeComLoginRequest request) {
         validateWeComConfig(true);
-        String stateKey = WECOM_STATE_KEY_PREFIX + request.getState();
-        if (!Boolean.TRUE.equals(redisUtils.hasKey(stateKey))) {
+        if (!Boolean.TRUE.equals(redisUtils.hasKey(RedisKeyEnum.AUTH_WECOM_STATE, request.getState()))) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "企业微信登录已过期，请重新扫码");
         }
-        redisUtils.delete(stateKey);
+        redisUtils.delete(RedisKeyEnum.AUTH_WECOM_STATE, request.getState());
 
         String accessToken = getWeComAccessToken();
         WeComUserInfoResponse userInfo = requestWeComUserInfo(accessToken, request.getCode());
@@ -147,7 +144,7 @@ public class AuthServiceImpl extends ServiceImpl<HrUserMapper, HrUser> implement
             token = JwtAuthenticationFilter.resolveToken(httpServletRequest);
         }
         if (StringUtils.hasText(token)) {
-            redisUtils.delete(JwtAuthenticationFilter.LOGIN_TOKEN_KEY_PREFIX + token);
+            redisUtils.delete(RedisKeyEnum.AUTH_LOGIN_TOKEN, token);
         }
         return Boolean.TRUE;
     }
@@ -203,12 +200,7 @@ public class AuthServiceImpl extends ServiceImpl<HrUserMapper, HrUser> implement
     private LoginResponse createLoginResponse(HrUser user) {
         LoginUser loginUser = toLoginUser(user);
         String token = jwtTokenProvider.createToken(loginUser);
-        redisUtils.set(
-                JwtAuthenticationFilter.LOGIN_TOKEN_KEY_PREFIX + token,
-                loginUser,
-                jwtTokenProvider.getExpiresInSeconds(),
-                TimeUnit.SECONDS
-        );
+        redisUtils.set(RedisKeyEnum.AUTH_LOGIN_TOKEN, token, loginUser, jwtTokenProvider.getExpiresInSeconds(), TimeUnit.SECONDS);
 
         LoginResponse response = new LoginResponse();
         response.setToken(token);
@@ -234,7 +226,7 @@ public class AuthServiceImpl extends ServiceImpl<HrUserMapper, HrUser> implement
     }
 
     private String buildWeComLoginUrl(String state) {
-        return WECOM_QR_LOGIN_URL
+        return ThirdPartyApiConstant.WECOM_QR_LOGIN_URL
                 + "?appid=" + encode(weComProperties.getCorpId())
                 + "&agentid=" + encode(weComProperties.getAgentId())
                 + "&redirect_uri=" + encode(weComProperties.getRedirectUri())
@@ -242,41 +234,41 @@ public class AuthServiceImpl extends ServiceImpl<HrUserMapper, HrUser> implement
     }
 
     private String getWeComAccessToken() {
-        Object cachedToken = redisUtils.get(WECOM_ACCESS_TOKEN_KEY);
+        Object cachedToken = redisUtils.get(RedisKeyEnum.AUTH_WECOM_ACCESS_TOKEN);
         if (cachedToken instanceof String && StringUtils.hasText((String) cachedToken)) {
             return (String) cachedToken;
         }
 
-        String url = UriComponentsBuilder.fromHttpUrl(WECOM_GET_TOKEN_URL)
-                .queryParam("corpid", weComProperties.getCorpId())
-                .queryParam("corpsecret", weComProperties.getSecret())
-                .toUriString();
-        WeComTokenResponse response = new RestTemplate().getForObject(url, WeComTokenResponse.class);
+        String url = httpRestClient.appendQuery(ThirdPartyApiConstant.WECOM_GET_TOKEN_URL, httpRestClient.mapOf(
+                "corpid", weComProperties.getCorpId(),
+                "corpsecret", weComProperties.getSecret()
+        ));
+        WeComTokenResponse response = httpRestClient.getForObject(url, WeComTokenResponse.class, 10);
         validateWeComResponse(response == null ? null : response.getErrCode(), response == null ? null : response.getErrMsg(), "获取企业微信access_token失败");
         if (!StringUtils.hasText(response.getAccessToken())) {
             throw new BusinessException(ErrorCode.MODEL_SERVICE_ERROR, "企业微信access_token为空");
         }
         long expiresIn = response.getExpiresIn() == null ? 7200L : response.getExpiresIn();
-        redisUtils.set(WECOM_ACCESS_TOKEN_KEY, response.getAccessToken(), Math.max(60L, expiresIn - 300L), TimeUnit.SECONDS);
+        redisUtils.set(RedisKeyEnum.AUTH_WECOM_ACCESS_TOKEN, response.getAccessToken(), Math.max(60L, expiresIn - 300L), TimeUnit.SECONDS);
         return response.getAccessToken();
     }
 
     private WeComUserInfoResponse requestWeComUserInfo(String accessToken, String code) {
-        String url = UriComponentsBuilder.fromHttpUrl(WECOM_GET_USER_INFO_URL)
-                .queryParam("access_token", accessToken)
-                .queryParam("code", code)
-                .toUriString();
-        WeComUserInfoResponse response = new RestTemplate().getForObject(url, WeComUserInfoResponse.class);
+        String url = httpRestClient.appendQuery(ThirdPartyApiConstant.WECOM_GET_USER_INFO_URL, httpRestClient.mapOf(
+                "access_token", accessToken,
+                "code", code
+        ));
+        WeComUserInfoResponse response = httpRestClient.getForObject(url, WeComUserInfoResponse.class, 10);
         validateWeComResponse(response == null ? null : response.getErrCode(), response == null ? null : response.getErrMsg(), "获取企业微信登录用户失败");
         return response;
     }
 
     private WeComUserDetailResponse requestWeComUserDetail(String accessToken, String userId) {
-        String url = UriComponentsBuilder.fromHttpUrl(WECOM_GET_USER_DETAIL_URL)
-                .queryParam("access_token", accessToken)
-                .queryParam("userid", userId)
-                .toUriString();
-        WeComUserDetailResponse response = new RestTemplate().getForObject(url, WeComUserDetailResponse.class);
+        String url = httpRestClient.appendQuery(ThirdPartyApiConstant.WECOM_GET_USER_DETAIL_URL, httpRestClient.mapOf(
+                "access_token", accessToken,
+                "userid", userId
+        ));
+        WeComUserDetailResponse response = httpRestClient.getForObject(url, WeComUserDetailResponse.class, 10);
         validateWeComResponse(response == null ? null : response.getErrCode(), response == null ? null : response.getErrMsg(), "获取企业微信成员详情失败");
         return response;
     }
