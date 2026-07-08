@@ -78,7 +78,7 @@ public class AiInterviewSettingServiceImpl extends ServiceImpl<AiInterviewSettin
         try {
             return redisUtils.get(RedisKeyEnum.AI_INTERVIEW_SETTING, AiInterviewSettingResponse.class);
         } catch (Exception ex) {
-            log.warn("AI interview setting cache invalid, reload from database", ex);
+            log.warn("AI interview setting cache invalid, reload from database, reason={}", summarizeException(ex));
             redisUtils.delete(RedisKeyEnum.AI_INTERVIEW_SETTING);
             return null;
         }
@@ -167,5 +167,21 @@ public class AiInterviewSettingServiceImpl extends ServiceImpl<AiInterviewSettin
 
     private String defaultQuestionAnswerGuide(String value) {
         return StringUtils.hasText(value) ? value.trim() : DEFAULT_CANDIDATE_QUESTION_ANSWER_GUIDE;
+    }
+
+    private String summarizeException(Exception ex) {
+        if (ex == null) {
+            return "";
+        }
+        Throwable root = ex;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        String message = root.getMessage();
+        if (!StringUtils.hasText(message)) {
+            return root.getClass().getSimpleName();
+        }
+        String summary = root.getClass().getSimpleName() + ": " + message.replaceAll("\\s+", " ").trim();
+        return summary.length() <= 300 ? summary : summary.substring(0, 300) + "...";
     }
 }

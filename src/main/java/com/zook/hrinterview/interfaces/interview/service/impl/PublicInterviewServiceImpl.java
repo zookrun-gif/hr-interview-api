@@ -21,6 +21,7 @@ import com.zook.hrinterview.interfaces.interview.mapper.InterviewSessionMapper;
 import com.zook.hrinterview.config.VolcengineRealtimeProperties;
 import com.zook.hrinterview.realtime.service.RealtimeTicketService;
 import com.zook.hrinterview.utils.RedisUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -28,6 +29,7 @@ import org.springframework.util.StringUtils;
 import javax.annotation.Resource;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
 
@@ -51,6 +53,9 @@ public class PublicInterviewServiceImpl implements PublicInterviewService {
 
     @Resource
     private RedisUtils redisUtils;
+
+    @Value("${app.interview.invite-valid-days:7}")
+    private Integer inviteValidDays;
 
     @Override
     public InterviewDetailResponse detail(PublicInterviewTokenRequest request) {
@@ -127,7 +132,52 @@ public class PublicInterviewServiceImpl implements PublicInterviewService {
             redisUtils.delete(RedisKeyEnum.INTERVIEW_PUBLIC_TOKEN, token);
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "面试链接不存在或已失效");
         }
+        if (InterviewStatus.EXPIRED.equals(session.getStatus())) {
+            redisUtils.delete(RedisKeyEnum.INTERVIEW_PUBLIC_TOKEN, token);
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "面试链接不存在或已失效");
+        }
+        if (expireInviteIfNeeded(session)) {
+            redisUtils.delete(RedisKeyEnum.INTERVIEW_PUBLIC_TOKEN, token);
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "面试链接不存在或已失效");
+        }
         return session;
+    }
+
+    private boolean expireInviteIfNeeded(InterviewSession session) {
+        if (session == null || !isInvitePendingStatus(session.getStatus())) {
+            return false;
+        }
+        LocalDateTime expiresAt = resolveInviteExpiresAt(session);
+        if (expiresAt == null || !LocalDateTime.now().isAfter(expiresAt)) {
+            return false;
+        }
+        session.setStatus(InterviewStatus.EXPIRED);
+        session.setInviteExpiresAt(expiresAt);
+        interviewSessionMapper.update(null, Wrappers.lambdaUpdate(InterviewSession.class)
+                .eq(InterviewSession::getId, session.getId())
+                .in(InterviewSession::getStatus, InterviewStatus.INVITED, InterviewStatus.WAITING)
+                .set(InterviewSession::getStatus, InterviewStatus.EXPIRED)
+                .set(InterviewSession::getInviteExpiresAt, expiresAt));
+        return true;
+    }
+
+    private boolean isInvitePendingStatus(String status) {
+        return InterviewStatus.INVITED.equals(status) || InterviewStatus.WAITING.equals(status);
+    }
+
+    private LocalDateTime resolveInviteExpiresAt(InterviewSession session) {
+        if (session == null) {
+            return null;
+        }
+        if (session.getInviteExpiresAt() != null) {
+            return session.getInviteExpiresAt();
+        }
+        LocalDateTime baseTime = session.getCreatedAt() == null ? LocalDateTime.now() : session.getCreatedAt();
+        return baseTime.plusDays(inviteValidDays());
+    }
+
+    private int inviteValidDays() {
+        return inviteValidDays == null || inviteValidDays <= 0 ? 7 : inviteValidDays;
     }
 
     private void verifyAccessCode(InterviewSession session, String accessCode) {

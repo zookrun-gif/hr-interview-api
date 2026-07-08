@@ -32,6 +32,9 @@ public class InterviewSession {
     @ApiModelProperty(value = "邀请令牌", required = true)
     private String inviteToken;
 
+    @ApiModelProperty(value = "邀请链接过期时间")
+    private LocalDateTime inviteExpiresAt;
+
     @ApiModelProperty(value = "面试访问口令哈希")
     private String accessCodeHash;
 

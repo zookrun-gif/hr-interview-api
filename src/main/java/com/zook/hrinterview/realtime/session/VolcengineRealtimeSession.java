@@ -867,7 +867,20 @@ public class VolcengineRealtimeSession implements RealtimeModelWebSocketListener
                 return true;
             }
             if (event == 459) {
+                String text = extractAsrText(payload);
+                if (StringUtils.hasText(text)) {
+                    resetAiPersistTurn();
+                    appendOrUpdateCandidateMessage(text);
+                }
                 if (shouldStopAsking()) {
+                    if (!hasCurrentCandidateMessageText()) {
+                        logInterviewProcess("candidate_empty_final_ignored", Map.of(
+                                "closingFollowUpStarted", closingFollowUpStarted,
+                                "closingFollowUpTurnCount", closingFollowUpTurnCount,
+                                "closingFollowUpTurnLimit", closingFollowUpTurnLimit()
+                        ));
+                        return true;
+                    }
                     String closingText = currentCandidateMessage == null ? "" : currentCandidateMessage.getContent();
                     handleQuestionLimitCandidateText(closingText, buildCandidatePolicyAnswer(closingText), true);
                     return true;
@@ -1095,6 +1108,11 @@ public class VolcengineRealtimeSession implements RealtimeModelWebSocketListener
         }
         currentPersistedCandidateMessageId = currentCandidateMessage.getId();
         rememberPersistedMessage("CANDIDATE", normalized);
+    }
+
+    private boolean hasCurrentCandidateMessageText() {
+        return currentCandidateMessage != null
+                && StringUtils.hasText(normalizeMessageContent(currentCandidateMessage.getContent()));
     }
 
     private boolean shouldStopAsking() {
@@ -1469,6 +1487,7 @@ public class VolcengineRealtimeSession implements RealtimeModelWebSocketListener
     }
 
     private CompletableFuture<Void> persistInsert(InterviewMessage message) {
+        logInterviewMessagePersist("insert", message);
         CompletableFuture<Void> future;
         if (realtimeMessagePersistService != null) {
             future = realtimeMessagePersistService.insertAsync(message);
@@ -1481,6 +1500,7 @@ public class VolcengineRealtimeSession implements RealtimeModelWebSocketListener
     }
 
     private CompletableFuture<Void> persistUpdateAfter(CompletableFuture<Void> previous, InterviewMessage message) {
+        logInterviewMessagePersist("update", message);
         CompletableFuture<Void> base = previous == null ? CompletableFuture.completedFuture(null) : previous;
         CompletableFuture<Void> future = base.handle((ignored, throwable) -> null).thenCompose(ignored -> {
             if (message.getSequenceNo() == null) {
@@ -1494,6 +1514,21 @@ public class VolcengineRealtimeSession implements RealtimeModelWebSocketListener
         });
         rememberPendingPersistence(future);
         return future;
+    }
+
+    private void logInterviewMessagePersist(String action, InterviewMessage message) {
+        if (message == null) {
+            return;
+        }
+        String content = normalizeMessageContent(message.getContent());
+        Map<String, Object> logBody = new LinkedHashMap<>();
+        logBody.put("action", action);
+        logBody.put("messageId", message.getId());
+        logBody.put("role", message.getRole());
+        logBody.put("sequenceNo", message.getSequenceNo());
+        logBody.put("contentLength", content == null ? 0 : content.length());
+        logBody.put("content", content);
+        logInterviewProcess("interview_message_persist", logBody);
     }
 
     private void upsertMessageDirectly(InterviewMessage message) {

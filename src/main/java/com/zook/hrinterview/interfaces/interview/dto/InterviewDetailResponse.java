@@ -34,6 +34,9 @@ public class InterviewDetailResponse {
     @ApiModelProperty(value = "面试链接", required = true)
     private String inviteUrl;
 
+    @ApiModelProperty(value = "邀请链接过期时间")
+    private LocalDateTime inviteExpiresAt;
+
     @ApiModelProperty(value = "面试访问口令，仅创建或重置口令时返回")
     private String accessCode;
 

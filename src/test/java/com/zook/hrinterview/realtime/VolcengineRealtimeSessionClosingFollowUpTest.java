@@ -7,6 +7,7 @@ import com.zook.hrinterview.config.VolcengineRealtimeProperties;
 import com.zook.hrinterview.interfaces.candidate.entity.Candidate;
 import com.zook.hrinterview.interfaces.interview.entity.InterviewMessage;
 import com.zook.hrinterview.interfaces.interview.entity.InterviewSession;
+import com.zook.hrinterview.interfaces.interview.mapper.InterviewMessageMapper;
 import com.zook.hrinterview.interfaces.job.entity.JobPosition;
 import com.zook.hrinterview.realtime.event.InterviewAutoFinishEvent;
 import com.zook.hrinterview.realtime.session.VolcengineRealtimeSession;
@@ -104,6 +105,51 @@ class VolcengineRealtimeSessionClosingFollowUpTest {
 
         assertTrue(hasEvent(browserMessages, "interview_auto_finished"));
         assertEquals(1, finishEvents.size());
+    }
+
+    @Test
+    void shouldIgnoreEmptyAsrFinalAfterQuestionLimit() throws Exception {
+        List<String> browserMessages = new ArrayList<>();
+        List<InterviewAutoFinishEvent> finishEvents = new ArrayList<>();
+        VolcengineRealtimeSession realtimeSession = createSession(1, browserMessages, finishEvents);
+        ReflectionTestUtils.setField(realtimeSession, "aiQuestionCount", 2);
+        ReflectionTestUtils.setField(realtimeSession, "interviewQuestionLimitReached", true);
+        ReflectionTestUtils.setField(realtimeSession, "closingFollowUpStarted", true);
+
+        ReflectionTestUtils.invokeMethod(realtimeSession, "appendRealtimeTextMessage", 459, "{}");
+
+        assertFalse(hasText(browserMessages, "已记录你的补充"));
+        assertFalse(hasText(browserMessages, "本轮面试到这里结束"));
+        assertFalse(hasEvent(browserMessages, "interview_auto_finished"));
+        assertEquals(0, (Integer) ReflectionTestUtils.getField(realtimeSession, "closingFollowUpTurnCount"));
+        assertTrue(finishEvents.isEmpty());
+    }
+
+    @Test
+    void shouldPersistClosingFollowUpCandidateTextBeforeSystemReply() throws Exception {
+        List<String> browserMessages = new ArrayList<>();
+        List<InterviewAutoFinishEvent> finishEvents = new ArrayList<>();
+        List<InterviewMessage> insertedMessages = new ArrayList<>();
+        InterviewMessageMapper interviewMessageMapper = mock(InterviewMessageMapper.class);
+        doAnswer(invocation -> {
+            insertedMessages.add(invocation.getArgument(0));
+            return 1;
+        }).when(interviewMessageMapper).insert(any(InterviewMessage.class));
+        VolcengineRealtimeSession realtimeSession = createSession(1, browserMessages, finishEvents, interviewMessageMapper);
+        ReflectionTestUtils.setField(realtimeSession, "aiQuestionCount", 2);
+        ReflectionTestUtils.setField(realtimeSession, "interviewQuestionLimitReached", true);
+        ReflectionTestUtils.setField(realtimeSession, "closingFollowUpStarted", true);
+
+        appendAsrText(realtimeSession, "工资什么时候发？");
+        ReflectionTestUtils.invokeMethod(realtimeSession, "appendRealtimeTextMessage", 459, "{}");
+
+        assertTrue(insertedMessages.stream().anyMatch(message ->
+                "CANDIDATE".equals(message.getRole()) && message.getContent().contains("工资什么时候发")));
+
+        ReflectionTestUtils.invokeMethod(realtimeSession, "appendRealtimeTextMessage", 359, "{}");
+
+        assertTrue(hasText(browserMessages, "工资发放时间：每月18号"));
+        assertTrue(hasText(browserMessages, "本轮面试到这里结束"));
     }
 
     @Test
@@ -235,6 +281,15 @@ class VolcengineRealtimeSessionClosingFollowUpTest {
             List<String> browserMessages,
             List<InterviewAutoFinishEvent> finishEvents
     ) {
+        return createSession(closingFollowUpTurnLimit, browserMessages, finishEvents, null);
+    }
+
+    private VolcengineRealtimeSession createSession(
+            int closingFollowUpTurnLimit,
+            List<String> browserMessages,
+            List<InterviewAutoFinishEvent> finishEvents,
+            InterviewMessageMapper interviewMessageMapper
+    ) {
         VolcengineRealtimeProperties properties = new VolcengineRealtimeProperties();
         properties.setTargetQuestionCount(2);
         properties.setMaxQuestionCount(2);
@@ -273,7 +328,7 @@ class VolcengineRealtimeSessionClosingFollowUpTest {
                 boundaryConfig,
                 List.of(),
                 candidate,
-                null,
+                interviewMessageMapper,
                 null,
                 null,
                 null,

@@ -2,6 +2,7 @@ package com.zook.hrinterview.common;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -23,6 +24,11 @@ public class GlobalExceptionHandler {
                 .map(error -> error.getField() + " " + error.getDefaultMessage())
                 .orElse(ErrorCode.PARAM_INVALID.getMessage());
         return ResponseEntity.ok(ApiResponse.failure(ErrorCode.PARAM_INVALID.getCode(), message));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUploadSizeExceededException(MaxUploadSizeExceededException ex) {
+        return ResponseEntity.ok(ApiResponse.failure(ErrorCode.PARAM_INVALID.getCode(), "上传文件不能超过20MB"));
     }
 
     @ExceptionHandler(Exception.class)

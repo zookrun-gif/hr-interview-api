@@ -145,6 +145,10 @@ public class AuthServiceImpl extends ServiceImpl<HrUserMapper, HrUser> implement
         }
         if (StringUtils.hasText(token)) {
             redisUtils.delete(RedisKeyEnum.AUTH_LOGIN_TOKEN, token);
+            long remainingSeconds = jwtTokenProvider.getRemainingSeconds(token);
+            if (remainingSeconds > 0) {
+                redisUtils.set(RedisKeyEnum.AUTH_LOGOUT_TOKEN, token, "1", remainingSeconds, TimeUnit.SECONDS);
+            }
         }
         return Boolean.TRUE;
     }

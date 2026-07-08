@@ -231,6 +231,7 @@ create table if not exists interview_session (
     candidate_id bigint not null comment '候选人ID',
     status varchar(32) not null comment '面试状态：CREATED已创建，INVITED已邀请，WAITING等待中，IN_PROGRESS面试中，GENERATING报告生成中，COMPLETED已完成，FAILED失败，CANCELLED已取消，EXPIRED已过期',
     invite_token varchar(64) not null comment '面试邀请令牌',
+    invite_expires_at datetime null comment '邀请链接过期时间',
     access_code_hash varchar(100) null comment '面试访问口令哈希',
     started_at datetime null comment '面试开始时间',
     ended_at datetime null comment '面试结束时间',
@@ -242,6 +243,8 @@ create table if not exists interview_session (
     key idx_interview_session_job_id (job_id),
     key idx_interview_session_candidate_id (candidate_id),
     key idx_interview_session_status (status),
+    key idx_interview_session_invite_expires_at (invite_expires_at),
+    key idx_interview_session_ended_at (ended_at),
     key idx_interview_session_created_at (created_at),
     key idx_interview_session_status_created_at (status, created_at),
     key idx_interview_session_job_created_at (job_id, created_at),
@@ -252,6 +255,10 @@ create table if not exists interview_session (
   comment = '面试会话表';
 
 call add_column_if_missing('interview_session', 'access_code_hash', 'alter table interview_session add column access_code_hash varchar(100) null comment ''面试访问口令哈希'' after invite_token');
+call add_column_if_missing('interview_session', 'invite_expires_at', 'alter table interview_session add column invite_expires_at datetime null comment ''邀请链接过期时间'' after invite_token');
+update interview_session set invite_expires_at = date_add(created_at, interval 7 day) where invite_expires_at is null;
+call add_index_if_missing('interview_session', 'idx_interview_session_invite_expires_at', 'create index idx_interview_session_invite_expires_at on interview_session (invite_expires_at)');
+call add_index_if_missing('interview_session', 'idx_interview_session_ended_at', 'create index idx_interview_session_ended_at on interview_session (ended_at)');
 call add_index_if_missing('interview_session', 'idx_interview_session_created_at', 'create index idx_interview_session_created_at on interview_session (created_at)');
 call add_index_if_missing('interview_session', 'idx_interview_session_status_created_at', 'create index idx_interview_session_status_created_at on interview_session (status, created_at)');
 call add_index_if_missing('interview_session', 'idx_interview_session_job_created_at', 'create index idx_interview_session_job_created_at on interview_session (job_id, created_at)');

@@ -9,6 +9,10 @@ spring:
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
 
 mybatis-plus:
   configuration:
@@ -47,3 +51,6 @@ app:
   api-access-log:
     enabled: true
     include-body: false
+    slow-threshold-ms: 1000
+  interview:
+    invite-valid-days: 7

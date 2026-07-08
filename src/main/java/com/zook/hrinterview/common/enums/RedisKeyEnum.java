@@ -20,6 +20,12 @@ public enum RedisKeyEnum {
     AUTH_LOGIN_TOKEN("hr:auth:token:", "登录 token 白名单", Duration.ofDays(7)),
 
     /**
+     * 退出登录 token 黑名单。
+     * value: 固定标记，TTL 与 JWT 剩余有效期一致。
+     */
+    AUTH_LOGOUT_TOKEN("hr:auth:logout-token:", "退出登录 token 黑名单", Duration.ofDays(7)),
+
+    /**
      * 企业微信扫码登录 state。
      * value: 固定标记。
      */

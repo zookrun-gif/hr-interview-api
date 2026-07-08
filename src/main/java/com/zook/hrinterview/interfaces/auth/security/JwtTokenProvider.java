@@ -58,11 +58,7 @@ public class JwtTokenProvider implements InitializingBean {
 
     public LoginUser parseToken(String token) {
         try {
-            Claims claims = Jwts.parserBuilder()
-                    .setSigningKey(secretKey)
-                    .build()
-                    .parseClaimsJws(token)
-                    .getBody();
+            Claims claims = parseClaims(token);
 
             LoginUser loginUser = new LoginUser();
             loginUser.setId(Long.valueOf(claims.getSubject()));
@@ -73,6 +69,28 @@ public class JwtTokenProvider implements InitializingBean {
         } catch (JwtException | IllegalArgumentException ex) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
         }
+    }
+
+    public long getRemainingSeconds(String token) {
+        try {
+            Claims claims = parseClaims(token);
+            Date expiration = claims.getExpiration();
+            if (expiration == null) {
+                return 0L;
+            }
+            long remainingMillis = expiration.getTime() - System.currentTimeMillis();
+            return remainingMillis <= 0 ? 0L : Math.max(1L, remainingMillis / 1000L);
+        } catch (JwtException | IllegalArgumentException ex) {
+            return 0L;
+        }
+    }
+
+    private Claims parseClaims(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(secretKey)
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
     }
 
     public long getExpiresInSeconds() {

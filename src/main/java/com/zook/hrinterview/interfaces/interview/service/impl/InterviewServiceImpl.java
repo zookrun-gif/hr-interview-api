@@ -43,6 +43,7 @@ import com.zook.hrinterview.utils.InterviewMessageUtils;
 import com.zook.hrinterview.utils.RedisUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -78,6 +79,9 @@ public class InterviewServiceImpl extends ServiceImpl<InterviewSessionMapper, In
     private static final String LEGACY_OPENING_MESSAGE = "你好，我是本次 AI 面试官。请先用一分钟介绍一下你自己。";
 
     private static final String LEGACY_RESUME_CONTROL_MESSAGE = "我们继续刚才的面试。请根据前面的回答继续提问，不要重新要求候选人做自我介绍。";
+
+    @Value("${app.interview.invite-valid-days:7}")
+    private Integer inviteValidDays;
 
     @Resource
     private JobPositionMapper jobPositionMapper;
@@ -163,6 +167,7 @@ public class InterviewServiceImpl extends ServiceImpl<InterviewSessionMapper, In
         session.setCandidateId(request.getCandidateId());
         session.setStatus(InterviewStatus.INVITED);
         session.setInviteToken(UUID.randomUUID().toString().replace("-", ""));
+        session.setInviteExpiresAt(LocalDateTime.now().plusDays(inviteValidDays()));
         String accessCode = generateAccessCode();
         session.setAccessCodeHash(passwordEncoder.encode(accessCode));
         save(session);
@@ -182,9 +187,14 @@ public class InterviewServiceImpl extends ServiceImpl<InterviewSessionMapper, In
                 .eq(request.getJobId() != null, InterviewSession::getJobId, request.getJobId())
                 .eq(request.getCandidateId() != null, InterviewSession::getCandidateId, request.getCandidateId())
                 .eq(StringUtils.isNotBlank(request.getStatus()), InterviewSession::getStatus, request.getStatus())
+                .ge(request.getCreatedAtStart() != null, InterviewSession::getCreatedAt, request.getCreatedAtStart())
+                .le(request.getCreatedAtEnd() != null, InterviewSession::getCreatedAt, request.getCreatedAtEnd())
+                .ge(request.getEndedAtStart() != null, InterviewSession::getEndedAt, request.getEndedAtStart())
+                .le(request.getEndedAtEnd() != null, InterviewSession::getEndedAt, request.getEndedAtEnd())
                 .orderByDesc(InterviewSession::getCreatedAt);
         Page<InterviewSession> page = page(Page.of(request.getPageNo(), request.getPageSize()), wrapper);
         List<InterviewSession> sessions = page.getRecords();
+        sessions.forEach(this::expireInviteIfNeeded);
         Map<Long, JobPosition> jobMap = batchQueryJobs(sessions);
         Map<Long, Candidate> candidateMap = batchQueryCandidates(sessions);
         List<InterviewDetailResponse> records = page.getRecords().stream()
@@ -200,6 +210,7 @@ public class InterviewServiceImpl extends ServiceImpl<InterviewSessionMapper, In
     @Override
     public InterviewDetailResponse start(IdRequest request) {
         InterviewSession session = mustGetSession(request.getId());
+        ensureInviteNotExpired(session);
         if (!InterviewStatus.INVITED.equals(session.getStatus()) && !InterviewStatus.WAITING.equals(session.getStatus())) {
             throw new BusinessException(ErrorCode.INTERVIEW_STATUS_INVALID);
         }
@@ -256,6 +267,7 @@ public class InterviewServiceImpl extends ServiceImpl<InterviewSessionMapper, In
     @Override
     public InterviewDetailResponse resetAccessCode(IdRequest request) {
         InterviewSession session = mustGetSession(request.getId());
+        ensureInviteNotExpired(session);
         if (!InterviewStatus.INVITED.equals(session.getStatus()) && !InterviewStatus.WAITING.equals(session.getStatus())) {
             throw new BusinessException(ErrorCode.INTERVIEW_STATUS_INVALID);
         }
@@ -382,6 +394,7 @@ public class InterviewServiceImpl extends ServiceImpl<InterviewSessionMapper, In
         if (session == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "面试会话不存在");
         }
+        expireInviteIfNeeded(session);
         return session;
     }
 
@@ -413,11 +426,58 @@ public class InterviewServiceImpl extends ServiceImpl<InterviewSessionMapper, In
         response.setStatus(session.getStatus());
         response.setInviteToken(session.getInviteToken());
         response.setInviteUrl("/interview/" + session.getInviteToken());
+        response.setInviteExpiresAt(resolveInviteExpiresAt(session));
         response.setHasAccessCode(StringUtils.isNotBlank(session.getAccessCodeHash()));
         response.setStartedAt(session.getStartedAt());
         response.setEndedAt(session.getEndedAt());
         response.setCreatedAt(session.getCreatedAt());
         return response;
+    }
+
+    private void ensureInviteNotExpired(InterviewSession session) {
+        if (expireInviteIfNeeded(session)) {
+            throw new BusinessException(ErrorCode.INTERVIEW_STATUS_INVALID, "面试邀请链接已过期，请重新创建面试");
+        }
+    }
+
+    private boolean expireInviteIfNeeded(InterviewSession session) {
+        if (session == null || !isInvitePendingStatus(session.getStatus())) {
+            return false;
+        }
+        LocalDateTime expiresAt = resolveInviteExpiresAt(session);
+        if (expiresAt == null || !LocalDateTime.now().isAfter(expiresAt)) {
+            return false;
+        }
+        session.setStatus(InterviewStatus.EXPIRED);
+        session.setInviteExpiresAt(expiresAt);
+        update(Wrappers.lambdaUpdate(InterviewSession.class)
+                .eq(InterviewSession::getId, session.getId())
+                .in(InterviewSession::getStatus, InterviewStatus.INVITED, InterviewStatus.WAITING)
+                .set(InterviewSession::getStatus, InterviewStatus.EXPIRED)
+                .set(InterviewSession::getInviteExpiresAt, expiresAt));
+        if (StringUtils.isNotBlank(session.getInviteToken())) {
+            redisUtils.delete(RedisKeyEnum.INTERVIEW_PUBLIC_TOKEN, session.getInviteToken());
+        }
+        return true;
+    }
+
+    private boolean isInvitePendingStatus(String status) {
+        return InterviewStatus.INVITED.equals(status) || InterviewStatus.WAITING.equals(status);
+    }
+
+    private LocalDateTime resolveInviteExpiresAt(InterviewSession session) {
+        if (session == null) {
+            return null;
+        }
+        if (session.getInviteExpiresAt() != null) {
+            return session.getInviteExpiresAt();
+        }
+        LocalDateTime baseTime = session.getCreatedAt() == null ? LocalDateTime.now() : session.getCreatedAt();
+        return baseTime.plusDays(inviteValidDays());
+    }
+
+    private int inviteValidDays() {
+        return inviteValidDays == null || inviteValidDays <= 0 ? 7 : inviteValidDays;
     }
 
     private Map<Long, JobPosition> batchQueryJobs(List<InterviewSession> sessions) {
